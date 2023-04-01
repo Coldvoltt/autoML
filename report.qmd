@@ -1,0 +1,351 @@
+---
+title: "AutoML with Covid-19 dataset"
+author: "Alexander Paul"
+date: "`r Sys.Date()`"
+bibliography: Reference.bib
+link-citations: yes
+output: html_document
+title-block-banner: true
+---
+
+```{css, echo = FALSE}
+.output {
+max-height: 300px;
+font-size: 12px;
+overflow-y: scroll;
+}
+
+.small-font {
+  font-size: 12px;
+}
+
+.medium-font {
+  font-size: 14px;
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+# Load the library
+library(tidyverse) # This is all I need for cleaning and exploration
+library(egg)
+library(kableExtra)
+library(plotly)
+library(h2o)
+library(caret)
+```
+
+
+## Introduction
+In the early stages of COVID-19 in late 2019 and early 2020, individuals having its symptoms visited a clinic for diagnostics. The clinic took their blood samples and was able to run a full blood test, including PCR test, on every individual of 6568 between November, 2019 and August, 2020. The dataset contains 33 features measures in the blood samples. Below are the features measured in the individuals' blood samples. The response feature is the PCR outcome - (the outcome of a test for COVID-19).  
+
+
+```{r}
+#| class: output
+
+#read in data
+df<-read_csv("CovidData.csv")
+# The dataset names
+dfNames<- as.vector(names(df))
+dfMatrix<- matrix(dfNames, ncol = 3)
+knitr::kable(dfMatrix, caption = 'Features in the dataset') %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = TRUE)
+```
+\ 
+
+### Aim and objectives
+The aim of the analysis is to obtain a model that most accurately classifies the `PCR_outcome` given the predictors using the autoML algorithm. The objectives in this analysis are listed as follows:  
+
+1. Data cleaning.    
+2. Data exploration.  
+3. Data sampling.  
+4. Data modelling.  
+5. Model Evaluation.  
+
+**Tools:** R, R-Studio, Quarto, Tidyverse, Plotly & h2o.  
+
+
+## Data Cleaning
+The dataset used was imported into R-studio and the first step was to convert features into their appropriate type. We also discovered a missing observation and the decision was to exclude the observation since the consequence, the percentage data loss will be insignificant.  
+
+```{r echo=TRUE}
+df <- df |>
+  mutate(
+    gender = as.factor(gender),
+    date_collected = as.POSIXct(date_collected, format = "%d/%m/%Y"),
+    HGB = as.numeric(HGB),
+    PCR_outcome = as.factor(PCR_outcome)
+  )
+
+# Just a missing observation in age. We can omit this.
+df<- na.omit(df)
+```
+
+
+## Data Exploration
+In this section, we use graphs to explore some important features in the dataset.  
+
+**Area Chart: **The area chart below shows the distribution of patients that visited the clinic per month, in relation to their PCR outcome. You may click on points on the plot to explore more.  
+
+```{r area chart}
+plot1<- df |> 
+  select(date_collected, PCR_outcome) |> 
+  mutate(date_collected = as.Date(date_collected),
+         date_collected = strftime(date_collected, format = "%Y-%m")) |>
+  group_by(date_collected, PCR_outcome) |> 
+  count()  |> 
+  mutate(date_collected = as.Date(paste0(date_collected,"-01"))) |> 
+  
+  # Plot the chart
+  ggplot(aes(x= date_collected, y= n, fill = PCR_outcome))+
+  geom_area(alpha = .8)+
+  geom_line(position = 'stack', size = 1, alpha = .8, color = 'white')+
+  geom_point(position = 'stack', size = 1.5, alpha = .5, color = 'black')+
+  scale_x_date(date_labels = "%b-%Y")+
+  scale_fill_manual(values = c("#FFBA08","#F48606"))+
+  theme_bw()+
+  labs(x = "Date Collected", y = "Number of Patients",
+       title = "Number of patients/month")+
+  theme(legend.position = "top",
+        legend.title = element_text(size=10))
+
+ggplotly(plot1)
+```
+\ 
+
+**Doughnut plots: **The doughnut plots below shows the gender distribution and PCR outcome distribution for all patients during the period.  
+
+```{r Doughnuts 1}
+dd<- df |>  
+  select(gender) |> 
+  count(gender, sort = TRUE) 
+
+
+dd$frac=dd$n/sum(dd$n)
+dd$ymax = cumsum(dd$frac)
+dd$ymin = c(0,head(dd$ymax, n = -1))
+
+# Gender Distribution
+p1<- dd %>% 
+  ggplot(aes(ymax = ymax, ymin = ymin, xmax = 4, xmin = 3, fill = gender))+
+  geom_rect()+
+  ggtitle("Gender Distribution") +
+  coord_polar(theta = "y")+
+  xlim(c(1.8,4))+ theme_void()+
+  theme(legend.position = "left",
+        legend.key.size = unit(.8,"cm"),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=10))+
+  labs(fill = "Gender")+
+  scale_fill_manual(values = c("#FFBA08","#F48606"))
+```
+
+
+```{r doughnut 2}
+dn<- df |>  
+  select(PCR_outcome) |> 
+  count(PCR_outcome, sort = TRUE) 
+
+
+dn$frac=dn$n/sum(dn$n)
+dn$ymax = cumsum(dn$frac)
+dn$ymin = c(0,head(dn$ymax, n = -1))
+
+# Gender Distribution
+p2<- dn %>% 
+  ggplot(aes(ymax = ymax, ymin = ymin, xmax = 4, xmin = 3, fill = PCR_outcome))+
+  geom_rect()+
+  ggtitle("Covid Detected?") +
+  coord_polar(theta = "y")+
+  xlim(c(1.8,4))+ theme_void()+
+  theme(legend.position = "right",
+        legend.key.size = unit(.8,"cm"),
+        legend.text = element_text(size=8),
+        legend.title = element_text(size=10))+
+  labs(fill = "Status")+
+  scale_fill_manual(values = c("#9D0208","#F48C06"))
+```
+
+```{r}
+ggarrange(p1,p2, ncol = 2, padding = unit(2, "cm"))
+```
+\ 
+
+**Bar charts: **  
+
+
+```{r bars1}
+plot2<- df |> 
+  ggplot(aes(x= PCR_outcome, fill = gender))+
+  geom_bar(stat = "count", position = "dodge")+
+  scale_fill_manual(values = c("#FFBA08","#F48606"))+
+  theme_bw()+
+  theme(legend.position = "right")+
+  labs(x = "Status", y = "Number of Patients",
+       title = "Distribution of patients & COVID status")
+```
+
+
+```{r ageGroups}
+plot3<- df |> 
+  select(age) |> 
+  mutate(ageGroup = case_when(age<=12~ "child",
+                              age>12 & age<=19 ~ "teenager",
+                              age>19 & age <=30 ~ "young adults",
+                              age>30 & age <= 45 ~ "middle aged adults",
+                              age>45 & age <= 60 ~ "elderly",
+                              TRUE ~ "old")) |> 
+  mutate(ageGroup = factor(ageGroup, levels = c("child","teenager","young adults",
+                                                "middle aged adults", "elderly",
+                                                "old"))) |> 
+  count(ageGroup) |> 
+  
+  # Make the plot
+  ggplot(aes(x = reorder(ageGroup, n), y = n, fill = n))+
+  geom_bar(stat = "identity")+
+  scale_fill_gradient(low = "#FFBA08", high = "#370617")+
+  labs(x = NULL, y = "count", title = "Age group distribution")+
+  coord_flip()+
+  theme_bw()+
+  theme(legend.position = "none")
+```
+
+We binned age feature into categories, ranging from child to old. The plot on the left shows the number of individuals in different age groups. The plot on the right shows the distribution of patients gender, in relation to COVID status.  
+
+```{r}
+ggarrange(plot3,plot2, ncol = 2, padding = unit(2, "cm"))
+```
+\ 
+
+**Important features**  
+We discovered the top important features as indicated by `XGboost`, one of the models from the autoML processes. Below are plots showing the levels of these features for both cases of PCR outcomes.  
+
+```{r basophils}
+plot4<- df |> 
+  ggplot(aes(x=PCR_outcome, y = Basophils, fill = PCR_outcome))+
+  geom_bar(stat = "summary", fun = "mean", width = .5)+
+  scale_fill_manual(values = c("#FFBA08","#F48606"))+
+  scale_x_discrete(expand = c(1.5,0.5))+
+  theme_bw()+
+  theme(legend.position = "none")+
+  labs(x = "Covid status", 
+       title = "Average basophils level for Covid status")
+```
+
+```{r wbcCount}
+plot5<- df |> 
+  ggplot(aes(x=PCR_outcome, y = Total_WBC_Count, fill = PCR_outcome))+
+  geom_bar(stat = "summary", fun = "mean", width = .5)+
+  scale_fill_manual(values = c("#9D0208","#DC2F02"))+
+  scale_x_discrete(expand = c(1.5,0.5))+
+  theme_bw()+
+  theme(legend.position = "none")+
+  labs(x = "Covid status", y = "Total WBC count",
+       title = "The average total WBC count for covid status")
+```
+
+The plot on the left shows the average basophils level for both PCR outcomes. We may observe that for patients with the virus present have their basophils level significantly lower than patients without the virus.  
+Also the plot on the right shows the average total white blood cell count for both PCR outcomes. We may observe from the plot that patients with the virus has lower white blood cells on average than patients without the virus.  
+
+```{r}
+ggarrange(plot4,plot5, ncol = 2, padding = unit(2, "cm"))
+```
+
+\ 
+
+**Total white blood cell count for each age group**  
+The plot below shows the average white blood cell count for each age group. We may observe that children (Aged 0 -12) has the highest average count of white blood cells while the elderly (aged 45 - 60) has the least average white blood cells.  
+
+```{r}
+plot6<- df |> 
+  select(age, Total_WBC_Count) |> 
+  mutate(ageGroup = case_when(age<=12~ "child",
+                              age>12 & age<=19 ~ "teenager",
+                              age>19 & age <=30 ~ "young adults",
+                              age>30 & age <= 45 ~ "middle aged adults",
+                              age>45 & age <= 60 ~ "elderly",
+                              TRUE ~ "old")) |> 
+  
+  ggplot(aes(x=reorder(ageGroup, Total_WBC_Count), y = Total_WBC_Count, fill = ageGroup))+
+  geom_bar(stat = "summary", fun = "mean", width = .6)+
+  scale_fill_manual(values = c("#03071E","#370617","#6A040F",
+                               "#9D0208","#F48C06","#FFBA08"))+
+  theme_bw()+
+  theme(legend.position = "none")+
+  labs(x = "Age group", y = "Total WBC count",
+       title = "The average total WBC count for covid status")+
+  coord_flip()
+
+ggplotly(plot6, width = 700)
+```
+
+## Data Sampling
+For this classification task, we need to split the dataset into train and test sets so we can evaluate the model using the test set. We use a stratified sampling technique so that we can have equal proportion of each class in the samples.  We  use the `createdataPartition` function from the caret package to split the dataset in the ratio 75:25. We also set seed for reproducability of results.    
+
+```{r sampling, echo = TRUE}
+# AutoML (Setting up connection cluster)
+h2o.init()
+h2o.no_progress()
+
+# Splitting the dataset into train and test sets
+set.seed(1)
+sampleSplit<- createDataPartition(df$PCR_outcome, p = .75, list = F)
+train<- as.h2o(df[sampleSplit,])
+test<- as.h2o(df[-sampleSplit,])
+```
+
+
+## Data Modelling
+The `h2o` package contains a function called autoML. This autoML function automatically computes different machine learning algorithms and evaluates the best model. [@H2OAutoML20]    
+
+
+```{r echo=TRUE}
+y <- "PCR_outcome"
+x <- setdiff(names(train), y)
+
+# Run AutoML for 20 base models
+aml <- h2o.automl(x = x, y = y,
+                  training_frame = train,
+                  max_models = 20,
+                  seed = 1)
+```
+
+The report of the autoML leader-board shows that the stacked Ensemble model performs the best in accurately classifying PCR_outcome with over 90% accuracy.  
+
+```{r leaderboard}
+# View the AutoML Leader board
+# Get leader board with all possible columns
+ldb <- h2o.get_leaderboard(object = aml)
+print(ldb, n = 10)  # Print all rows instead of default (6 rows)
+```
+
+**Variable Importance**  
+Because there is no available method to obtain feature importance for the Stacked Ensemble model, we evaluate feature importance for Gradient Boosting Model (the second best model in the leader-board).
+
+```{r}
+# Get the best gbm model using default sort metric
+gbm <- h2o.get_best_model(aml, algorithm = "gbm")
+h2o.varimp_plot(gbm) # The variable importance plot for GBM model
+```
+
+## Model Evaluation
+We evaluate the model using the test set. The result below shows the performance of the model.
+
+```{r}
+# Making predictions using the best model (Stacked Ensemble model)
+pred <- h2o.predict(aml@leader, test)
+testPred<- as.data.frame(as.factor(pred$predict))
+original<- as.data.frame(as.factor(test$PCR_outcome))
+
+# Evaluating the prediction using Caret pkg
+confusionMatrix(testPred$predict,original$PCR_outcome)
+```
+
+
+## Conclusion and recommendations
+In this report, we have been able to reach the objectives. We were able to visually explore the dataset, sample the data appropriately, model the data and evaluate the model. The Stacked ensemble model was able to outperform other models with high accuracy.  
+If we want outright high model performance with minimal interpretability, we may employ the 
+stacked ensemble model but if we want a model with good performance and with more interpretable outputs, we may employ the Gradient boosting model (GBM).
