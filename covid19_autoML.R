@@ -2,6 +2,9 @@
 library(caret)
 library(h2o)
 
+# AutoML (Setting up connection cluster)
+h2o.init()
+
 # Splitting the dataset into train and test sets
 set.seed(1)
 sampleSplit<- createDataPartition(df$PCR_outcome, p = .75, list = F)
@@ -9,8 +12,7 @@ train<- as.h2o(df[sampleSplit,])
 test<- as.h2o(df[-sampleSplit,])
 
 
-# AutoML (Setting up connection cluster)
-h2o.init()
+
 
 y <- "PCR_outcome"
 x <- setdiff(names(train), y)
@@ -26,7 +28,7 @@ lb <- aml@leaderboard
 print(lb, n = nrow(lb))  # Print all rows instead of default (6 rows)
 
 # Get leader board with all possible columns
-ldb <- h2o.get_leaderboard(object = aml, extra_columns = "ALL")
+ldb <- h2o.get_leaderboard(object = aml)
 
 # Obtain every information about the best model
 aml@leader
